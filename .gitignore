@@ -1,0 +1,32 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment files
+.env
+
+# Local data and models
+data/*
+!data/.gitkeep
+
+bge-small-en-v1.5/*
+!bge-small-en-v1.5/.gitkeep
+
+qwen3-reranker-0.6b/*
+!qwen3-reranker-0.6b/.gitkeep
+
+# Local vector store / runtime artifacts
+storage/*
+!storage/.gitkeep
+.lock
+
+# Editor / OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

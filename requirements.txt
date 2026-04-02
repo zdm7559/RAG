@@ -1,0 +1,10 @@
+fastapi
+openai
+pydantic
+pypdf
+python-dotenv
+qdrant-client
+sentence-transformers
+torch
+transformers>=4.51.0
+uvicorn

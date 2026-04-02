@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mini RAG with Qdrant</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, "Microsoft YaHei", sans-serif;
+      background: #f5f7fb;
+      color: #1f2937;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: 40px auto;
+      padding: 24px;
+    }
+
+    .card {
+      background: #ffffff;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 28px;
+    }
+
+    .desc {
+      color: #6b7280;
+      margin-bottom: 24px;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    textarea,
+    input,
+    select {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      font-size: 14px;
+      outline: none;
+      background: #fff;
+    }
+
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .checkbox-row input {
+      width: auto;
+      margin: 0;
+    }
+
+    .btn {
+      border: none;
+      background: #2563eb;
+      color: white;
+      padding: 12px 18px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .btn:disabled {
+      background: #93c5fd;
+      cursor: not-allowed;
+    }
+
+    .status {
+      margin-top: 12px;
+      color: #6b7280;
+      font-size: 14px;
+    }
+
+    .answer-box {
+      white-space: pre-wrap;
+      line-height: 1.7;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      padding: 16px;
+      border-radius: 12px;
+    }
+
+    .doc-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+      background: #fcfcfd;
+    }
+
+    .doc-meta {
+      font-size: 13px;
+      color: #6b7280;
+      margin-bottom: 10px;
+      line-height: 1.6;
+    }
+
+    .doc-text {
+      white-space: pre-wrap;
+      line-height: 1.7;
+      color: #111827;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .error {
+      color: #dc2626;
+      font-weight: 600;
+    }
+
+    @media (max-width: 768px) {
+      .row {
+        grid-template-columns: 1fr;
+      }
+
+      .container {
+        margin: 20px auto;
+        padding: 16px;
+      }
+
+      .card {
+        padding: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>Mini RAG with Qdrant</h1>
+      <div class="desc">
+        输入问题后，前端会调用 <code>/rag/chat</code>，返回答案和检索到的片段。
+      </div>
+
+      <div class="form-group">
+        <label for="query">问题</label>
+        <textarea id="query" placeholder="例如：What is spatial transcriptomics?"></textarea>
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label for="retrieve_top_n">第一次召回数量</label>
+          <input id="retrieve_top_n" type="number" min="1" max="100" value="30" />
+        </div>
+
+        <div class="form-group">
+          <label for="top_k">最终送入 LLM 数量</label>
+          <input id="top_k" type="number" min="1" max="20" value="5" />
+        </div>
+      </div>
+
+      <div class="checkbox-row">
+        <input id="enable_rerank" type="checkbox" checked />
+        <label for="enable_rerank">启用模型式 rerank</label>
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label for="rerank_top_n">进入重排数量</label>
+          <input id="rerank_top_n" type="number" min="1" max="50" value="10" />
+        </div>
+
+        <div class="form-group">
+          <label for="rerank_threshold">重排分数阈值（可选）</label>
+          <input id="rerank_threshold" type="number" min="0" max="1" step="0.01" placeholder="留空则不按重排分数过滤" />
+        </div>
+
+        <div class="form-group">
+          <label for="score_threshold">召回分数阈值（可选）</label>
+          <input id="score_threshold" type="number" min="0" max="1" step="0.01" placeholder="留空则不按召回分数过滤" />
+        </div>
+      </div>
+
+      <button class="btn" id="askBtn">提交问题</button>
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="card hidden" id="answerCard">
+      <h2>回答</h2>
+      <div class="answer-box" id="answer"></div>
+    </div>
+
+    <div class="card hidden" id="docsCard">
+      <h2>检索到的片段</h2>
+      <div id="docs"></div>
+    </div>
+  </div>
+
+  <script>
+    const askBtn = document.getElementById("askBtn");
+    const queryEl = document.getElementById("query");
+    const retrieveTopNEl = document.getElementById("retrieve_top_n");
+    const topKEl = document.getElementById("top_k");
+    const enableRerankEl = document.getElementById("enable_rerank");
+    const rerankTopNEl = document.getElementById("rerank_top_n");
+    const rerankThresholdEl = document.getElementById("rerank_threshold");
+    const scoreThresholdEl = document.getElementById("score_threshold");
+    const statusEl = document.getElementById("status");
+
+    const answerCard = document.getElementById("answerCard");
+    const docsCard = document.getElementById("docsCard");
+    const answerEl = document.getElementById("answer");
+    const docsEl = document.getElementById("docs");
+
+    async function askQuestion() {
+      const query = queryEl.value.trim();
+      const retrieve_top_n = Number(retrieveTopNEl.value) || 30;
+      const top_k = Number(topKEl.value) || 3;
+      const enable_rerank = enableRerankEl.checked;
+      const rerank_top_n = Number(rerankTopNEl.value) || 10;
+      const rerank_threshold = rerankThresholdEl.value.trim();
+      const score_threshold = scoreThresholdEl.value.trim();
+
+      if (!query) {
+        statusEl.innerHTML = '<span class="error">请输入问题</span>';
+        return;
+      }
+
+      askBtn.disabled = true;
+      statusEl.textContent = "正在请求后端，请稍候...";
+      answerCard.classList.add("hidden");
+      docsCard.classList.add("hidden");
+      answerEl.textContent = "";
+      docsEl.innerHTML = "";
+
+      const payload = {
+        query,
+        retrieve_top_n,
+        top_k,
+        enable_rerank,
+        rerank_top_n
+      };
+
+      if (score_threshold) {
+        payload.score_threshold = Number(score_threshold);
+      }
+
+      if (rerank_threshold) {
+        payload.rerank_threshold = Number(rerank_threshold);
+      }
+
+      try {
+        const response = await fetch("/rag/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(errText || "请求失败");
+        }
+
+        const data = await response.json();
+
+        answerEl.textContent = data.answer || "";
+        answerCard.classList.remove("hidden");
+
+        const docs = data.retrieved_docs || [];
+        docsEl.innerHTML = "";
+
+        docs.forEach((doc, index) => {
+          const div = document.createElement("div");
+          div.className = "doc-card";
+          div.innerHTML = `
+            <div class="doc-meta">
+              <strong>Top ${index + 1}</strong><br>
+              source: ${doc.source}<br>
+              chunk_id: ${doc.chunk_id}<br>
+              final_score: ${formatScore(doc.score)}<br>
+              embedding_score: ${formatScore(doc.embedding_score)}<br>
+              rerank_score: ${formatScore(doc.rerank_score)}<br>
+              retrieval_rank: ${doc.retrieval_rank ?? ""}<br>
+              rerank_rank: ${doc.rerank_rank ?? ""}<br>
+              file_type: ${doc.file_type ?? ""}
+            </div>
+            <div class="doc-text">${escapeHtml(doc.text)}</div>
+          `;
+          docsEl.appendChild(div);
+        });
+
+        docsCard.classList.remove("hidden");
+        statusEl.textContent = data.message || "请求成功";
+      } catch (error) {
+        statusEl.innerHTML = `<span class="error">请求失败：${escapeHtml(String(error.message || error))}</span>`;
+      } finally {
+        askBtn.disabled = false;
+      }
+    }
+
+    function formatScore(value) {
+      return Number.isFinite(Number(value)) ? Number(value).toFixed(4) : "";
+    }
+
+    function escapeHtml(str) {
+      return str
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    askBtn.addEventListener("click", askQuestion);
+
+    queryEl.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        askQuestion();
+      }
+    });
+  </script>
+</body>
+</html>
